@@ -247,6 +247,28 @@ select.btn option { background: var(--panel); color: var(--text); }
 }
 .lcd-small { font-family: var(--font-mono), monospace; font-size: 12px; color: var(--mint); }
 
+/* ---- grooves (saved through tabs on jam.geyser.at) ---- */
+.who { color: var(--text); font-weight: 500; }
+.save-row { display: flex; gap: 8px; }
+.input {
+  flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text);
+  padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: #03070b;
+  transition: border-color 120ms;
+}
+.input::placeholder { color: var(--faint); }
+.input:focus { outline: none; border-color: rgba(var(--mint-rgb), 0.6); }
+.groove-list { display: flex; flex-direction: column; gap: 6px; max-height: min(52vh, 420px); overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.groove { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 0; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.2); }
+.groove.current { border-color: rgba(var(--mint-rgb), 0.45); box-shadow: inset 3px 0 0 var(--mint); }
+.groove-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 8px 12px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: 10px;
+}
+.groove-main:hover:not(:disabled) .groove-name { color: var(--mint); }
+.groove-main:disabled { cursor: default; }
+.groove-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 120ms; }
+.groove-meta { font-family: var(--font-mono), monospace; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- footer / toast ---- */
 .footer { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: center; color: var(--muted); font-size: 12px; margin-top: 6px; }
 .footer-credit { flex-basis: 100%; text-align: center; color: var(--faint); }
@@ -291,4 +313,37 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .play.is-playing { animation: none; }
   .cell { transition: none; }
+}
+
+/* ---- pads: 3 × 3, play the kit live ---- */
+.hint-inline { color: var(--faint); font-size: 12px; }
+.pads-wrap { display: grid; grid-template-columns: minmax(0, 420px) 1fr; gap: 20px; align-items: start; }
+.pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pad {
+  position: relative; aspect-ratio: 1; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--line-2); color: var(--text);
+  background: linear-gradient(160deg, var(--cell-alt), var(--cell));
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35), 0 6px 18px -10px rgba(0, 0, 0, 0.8);
+  display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 12px;
+  transition: transform 50ms, border-color 120ms;
+  -webkit-tap-highlight-color: transparent; touch-action: none;
+}
+.pad:hover:not(:disabled) { border-color: rgba(var(--mint-rgb), 0.45); }
+.pad.down { transform: scale(0.965); border-color: var(--mint); box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5); }
+.pad-name { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+.pad-key { align-self: flex-end; opacity: 0.55; }
+.pad-key kbd { font-size: 11px; }
+.pad-fill { border-style: dashed; color: var(--muted); }
+.pad-fill.on, .pad-fill.down { color: #03120e; background: var(--mint); border-color: var(--mint); border-style: solid; }
+.pad:disabled { opacity: 0.4; cursor: default; }
+.pads-side { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.pad-rec { display: inline-flex; align-items: center; gap: 8px; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--orange); opacity: 0.45; }
+.btn.on.rec { background: var(--orange); border-color: var(--orange); color: #1a0a00; }
+.btn.on.rec .rec-dot { background: #1a0a00; opacity: 1; animation: recblink 1s steps(2, end) infinite; }
+@keyframes recblink { 50% { opacity: 0.25; } }
+.pads-hint { margin: 0; line-height: 1.6; }
+@media (max-width: 760px) {
+  .pads-wrap { grid-template-columns: 1fr; }
+  .pads { max-width: 420px; width: 100%; margin: 0 auto; }
 }

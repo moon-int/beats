@@ -13,8 +13,8 @@ type StepEvent = { step: number; total: number; time: number; hits: [number, num
 
 const LOOKAHEAD = 0.12;  // seconds of audio scheduled ahead
 const TICK_MS = 25;      // scheduler wake-up interval
-const ACCENT_VEL = 1;
-const NORMAL_VEL = 0.68;
+export const ACCENT_VEL = 1;
+export const NORMAL_VEL = 0.68;
 
 // 808-style metallic hat partials (Hz)
 const HAT_PARTIALS = [205.3, 304.4, 369.6, 522.7, 540, 800];
@@ -318,6 +318,11 @@ export class DrumEngine {
    * chain mode) — or null to keep playing the current one.
    */
   onBarStart?: () => number[][] | null;
+  /**
+   * Every 16th as it is scheduled, with the audio time it will sound at — for things that play along
+   * in time with the sequencer (the pads' note repeat), via hit(…, time).
+   */
+  onSchedule?: (step: number, time: number, sixteenth: number) => void;
 
   private synth: Synth | null = null;
   private bpm = 120;
@@ -333,6 +338,8 @@ export class DrumEngine {
   private nextTime = 0;
   private step = 0;
   private queue: StepEvent[] = [];
+  private flashes: { time: number; track: number; vel: number }[] = [];
+  private heard: { step: number; time: number } | null = null;
 
   // ---- parameters -------------------------------------------------------
 
@@ -373,6 +380,7 @@ export class DrumEngine {
     this.queue = [];
     this.nextTime = ctx.currentTime + 0.06;
     this.tick();
+    if (this.raf != null) cancelAnimationFrame(this.raf); // pad flashes may have kept a frame loop going
     this.frame();
   }
 
@@ -382,6 +390,8 @@ export class DrumEngine {
     if (this.raf != null) cancelAnimationFrame(this.raf);
     this.timer = this.raf = null;
     this.queue = [];
+    this.flashes = [];
+    this.heard = null;
     this.onStep?.(-1, 0);
   }
 
@@ -396,6 +406,34 @@ export class DrumEngine {
     const ctx = await this.ensure();
     this.synth!.play(track, ctx.currentTime + 0.005, velocity);
     this.onTrigger?.(track, velocity);
+  }
+
+  /**
+   * Plays a track at an audio time (default: now) — the pads. Its led lights when it is heard.
+   * Returns false before the audio has started.
+   */
+  hit(track: number, velocity = ACCENT_VEL, time?: number) {
+    const ctx = this.ctx, synth = this.synth;
+    if (!ctx || !synth) { void this.preview(track, velocity); return false; }
+    if (ctx.state !== 'running') void ctx.resume().catch(() => {});
+    const at = Math.max(ctx.currentTime + 0.003, time ?? 0);
+    synth.play(track, at, velocity);
+    if (time === undefined) this.onTrigger?.(track, velocity);
+    else { this.flashes.push({ time: at, track, vel: velocity }); if (this.raf == null) this.frame(); }
+    return true;
+  }
+
+  /**
+   * Where the sequencer is as you hear it: the 16th being heard and how far into it (0…1) — what a
+   * pad hit is quantised against when recording. Null while stopped.
+   */
+  heardPosition(): { step: number; frac: number; sixteenth: number } | null {
+    const ctx = this.ctx;
+    if (!ctx || !this.playing || !this.heard) return null;
+    const sixteenth = 60 / this.bpm / 4;
+    const latency = (ctx.baseLatency || 0) + ((ctx as any).outputLatency || 0);
+    const frac = (ctx.currentTime - latency - this.heard.time) / sixteenth;
+    return { step: this.heard.step, frac: Math.max(0, frac), sixteenth };
   }
 
   dispose() {
@@ -438,6 +476,7 @@ export class DrumEngine {
       });
 
       this.queue.push({ step, total: this.step, time, hits });
+      this.onSchedule?.(step, time, sixteenth);
       this.nextTime += sixteenth;
       this.step++;
     }
@@ -451,10 +490,17 @@ export class DrumEngine {
       const now = ctx.currentTime - latency;
       while (this.queue.length && this.queue[0].time <= now) {
         const e = this.queue.shift()!;
+        this.heard = { step: e.step, time: e.time };
         this.onStep?.(e.step, e.total);
         e.hits.forEach(([r, v]) => this.onTrigger?.(r, v));
       }
+      if (this.flashes.length) {
+        const due = this.flashes.filter(f => f.time <= now);
+        this.flashes = this.flashes.filter(f => f.time > now);
+        due.forEach(f => this.onTrigger?.(f.track, f.vel));
+      }
     }
-    this.raf = requestAnimationFrame(this.frame);
+    // stopped, only pad flashes to deliver: run until they are out
+    this.raf = this.playing || this.flashes.length ? requestAnimationFrame(this.frame) : null;
   };
 }

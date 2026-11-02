@@ -5,9 +5,12 @@ import StepGrid from '../components/StepGrid';
 import Mixer from '../components/Mixer';
 import Visualizer from '../components/Visualizer';
 import ExportDialog from '../components/ExportDialog';
+import GrooveLibrary from '../components/GrooveLibrary';
+import Pads, { padOf } from '../components/Pads';
 import { DrumEngine, type TrackParams } from '../lib/engine';
 import { kits, TRACK_COUNT } from '../lib/kits';
 import { STEPS, SLOTS, presets, emptyPattern, parseRows, randomPattern } from '../lib/patterns';
+import { JAM_API, jam, type CompactGroove } from '../lib/jam';
 
 type AppState = {
   bpm: number;
@@ -42,11 +45,13 @@ export default function HomePage() {
   const [step, setStep] = useState({ step: -1, total: 0 });
   const [toast, setToast] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [grooveOpen, setGrooveOpen] = useState(false);
   // live: pattern changes while playing wait for the next downbeat; chain walks a→b→c→d
   const [queued, setQueued] = useState<number | null>(null);
   const [chain, setChain] = useState(false);
   const clipboard = useRef<number[][] | null>(null);
   const ledRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const padRefs = useRef<(HTMLElement | null)[]>([]);
   const live = useRef({ state, queued: null as number | null, chain: false });
   live.current.state = state;
   live.current.chain = chain;
@@ -63,6 +68,11 @@ export default function HomePage() {
       ledRefs.current[track]?.animate(
         [{ opacity: 1, transform: 'scale(1.35)' }, { opacity: 0.18, transform: 'scale(1)' }],
         { duration: 160 + vel * 200, easing: 'ease-out' },
+      );
+      // the pad of that track lights up too — what the sequencer plays, and what you play
+      padRefs.current[padOf(track)]?.animate(
+        [{ boxShadow: `0 0 0 2px rgba(0, 255, 206, ${0.5 + vel * 0.5}), 0 0 ${18 + vel * 22}px rgba(0, 255, 206, ${0.35 + vel * 0.4})`, filter: `brightness(${1.35 + vel * 0.5})` }, { boxShadow: '0 0 0 0 rgba(0, 255, 206, 0)', filter: 'brightness(1)' }],
+        { duration: 180 + vel * 220, easing: 'ease-out' },
       );
     };
     // runs in the scheduler right before a downbeat — the switch lands exactly on the one
@@ -99,6 +109,14 @@ export default function HomePage() {
     if (loaded) setState(loaded);
     if (fromHash) history.replaceState(null, '', window.location.pathname);
     setHydrated(true);
+    // a link from the band's overview (jam.geyser.at): ?groove=<id> opens that saved groove
+    const wanted = new URLSearchParams(window.location.search).get('groove');
+    if (wanted && JAM_API) {
+      history.replaceState(null, '', window.location.pathname);
+      jam.get(wanted)
+        .then(g => { const loaded = fromCompact(g.data); if (loaded) { setState(loaded); flash(`“${g.name}” loaded`); } })
+        .catch(() => flash('that groove could not be loaded — signed in?'));
+    }
   }, []);
 
   useEffect(() => {
@@ -120,6 +138,11 @@ export default function HomePage() {
 
   const setCell = useCallback((r: number, c: number, v: number) => {
     setPatternFor(p => p.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)));
+  }, [setPatternFor]);
+
+  /** rec on the pads: a hit lands on a step — never turning an accent back into a plain hit */
+  const recordHit = useCallback((r: number, c: number, v: 1 | 2) => {
+    setPatternFor(p => (p[r]?.[c] >= v ? p : p.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row))));
   }, [setPatternFor]);
 
   const setTrack = useCallback((i: number, patch: Partial<TrackParams>) => {
@@ -190,6 +213,7 @@ export default function HomePage() {
       if (el.closest('input, select, textarea, dialog') || e.metaKey || e.ctrlKey) return;
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
       if (e.repeat) return;
+      if (e.code.startsWith('Numpad')) return; // the number block plays the pads (components/Pads.tsx)
       const n = Number(e.key);
       if (n >= 1 && n <= TRACK_COUNT) { audition(n - 1); return; }
       const slot = SLOT_NAMES.indexOf(e.key.toLowerCase());
@@ -265,6 +289,12 @@ export default function HomePage() {
             <option value="" disabled>presets…</option>
             {presets.map(p => <option key={p.name} value={p.name}>{p.name} · {p.bpm}</option>)}
           </select>
+          {JAM_API && (
+            <button className="btn" onClick={() => setGrooveOpen(true)} title="save this groove for the band, or load one — kept with tabs and havoc">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }}><path d="M4 2.5h8v11l-4-2.8-4 2.8z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>
+              grooves
+            </button>
+          )}
           <button className="btn" onClick={() => setPatternFor(() => randomPattern())}>randomize</button>
           <button className="btn warn" onClick={() => setPatternFor(() => emptyPattern())}>clear</button>
           <button className="btn primary" onClick={() => setExportOpen(true)}>
@@ -290,6 +320,18 @@ export default function HomePage() {
 
       <section className="panel">
         <div className="section-head">
+          <h2>pads</h2>
+          <div className="spacer" />
+          <span className="hint-inline">play the kit live — with rec on, it lands in pattern {SLOT_NAMES[state.slot]}</span>
+        </div>
+        <Pads
+          engine={engine} playing={playing} labels={kit.voices.map(v => v.label)}
+          pattern={pattern} padRefs={padRefs} onRecord={recordHit}
+        />
+      </section>
+
+      <section className="panel">
+        <div className="section-head">
           <h2>mixer</h2>
           <div className="spacer" />
           <button className="btn" onClick={() => share()}>share link</button>
@@ -304,6 +346,7 @@ export default function HomePage() {
         <span><kbd>1</kbd>–<kbd>8</kbd> play sound</span>
         <span><kbd>a</kbd>–<kbd>d</kbd> pattern (on the next bar · <kbd>shift</kbd> at once)</span>
         <span><kbd>↑</kbd><kbd>↓</kbd> tempo</span>
+        <span>number block or <kbd>u</kbd><kbd>i</kbd><kbd>o</kbd>/<kbd>j</kbd><kbd>k</kbd><kbd>l</kbd>/<kbd>m</kbd><kbd>,</kbd><kbd>.</kbd> pads</span>
         <span className="footer-credit">all sounds synthesized live with web audio · <a href="https://mo-tion.at" target="_blank" rel="noreferrer">mo-tion.at</a> · <a href="https://github.com/moon-int/beats" target="_blank" rel="noreferrer">open source on github</a></span>
       </footer>
 
@@ -319,6 +362,21 @@ export default function HomePage() {
         swing={state.swing}
         volume={state.volume}
       />
+
+      {JAM_API && (
+        <GrooveLibrary
+          open={grooveOpen}
+          onClose={() => setGrooveOpen(false)}
+          current={() => compactOf(state)}
+          onLoad={(data, name) => {
+            const loaded = fromCompact(data);
+            if (!loaded) { flash('that groove could not be read'); return; }
+            setState(loaded);
+            flash(`“${name}” loaded`);
+          }}
+          flash={flash}
+        />
+      )}
 
       <div className={`toast ${toast ? 'show' : ''}`} role="status">{toast}</div>
     </div>
@@ -376,26 +434,34 @@ function sanitize(raw: any): AppState | null {
   };
 }
 
-// compact form: patterns as digit strings, tracks as [gain, pan, tune, decay, mute, solo]
-function encodeShare(s: AppState) {
-  const compact = {
+// compact form: patterns as digit strings, tracks as [gain, pan, tune, decay, mute, solo] —
+// what share links carry, what the band's saved grooves hold, what tabs' groove desk reads
+function compactOf(s: AppState): CompactGroove {
+  return {
     b: s.bpm, w: s.swing, v: s.volume, k: s.kit, s: s.slot,
     p: s.patterns.map(p => p.map(r => r.join('')).join('.')),
     t: s.tracks.map(t => [t.gain, t.pan, t.tune, t.decay, +t.mute, +t.solo].map(x => Math.round(x * 100) / 100)),
   };
-  return btoa(JSON.stringify(compact)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromCompact(c: any): AppState | null {
+  if (!c || typeof c !== 'object') return null;
+  return sanitize({
+    bpm: c.b, swing: c.w, volume: c.v, kit: c.k, slot: c.s,
+    patterns: (Array.isArray(c.p) ? c.p : []).map((p: string) => String(p).split('.').map(r => r.split('').map(Number))),
+    tracks: (Array.isArray(c.t) ? c.t : []).map((t: number[]) => ({ gain: t[0], pan: t[1], tune: t[2], decay: t[3], mute: !!t[4], solo: !!t[5] })),
+  });
+}
+
+function encodeShare(s: AppState) {
+  return btoa(JSON.stringify(compactOf(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function decodeShare(hash: string): AppState | null {
   const m = hash.match(/^#s=([\w-]+)$/);
   if (!m) return null;
   try {
-    const c = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
-    return sanitize({
-      bpm: c.b, swing: c.w, volume: c.v, kit: c.k, slot: c.s,
-      patterns: (c.p ?? []).map((p: string) => String(p).split('.').map(r => r.split('').map(Number))),
-      tracks: (c.t ?? []).map((t: number[]) => ({ gain: t[0], pan: t[1], tune: t[2], decay: t[3], mute: !!t[4], solo: !!t[5] })),
-    });
+    return fromCompact(JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/'))));
   } catch {
     return null;
   }
